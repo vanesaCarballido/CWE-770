@@ -1,18 +1,25 @@
 version: "3.8"
 
 services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: cwe770-dashboard
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
   vulnerable:
     build: ./vulnerable
     container_name: cwe770-vulnerable
     ports:
       - "5000:5000"
-    # Mismo límite de recursos que el servidor "fixed", para que la
-    # comparación sea justa: la diferencia de comportamiento debe venir
-    # del CÓDIGO (falta de límites lógicos), no de Docker.
-    mem_limit: 256m
-    memswap_limit: 256m   # igual a mem_limit -> deshabilita el swap
-    mem_swappiness: 0     # evita que el kernel prefiera paginar
-    cpus: 1.0
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     volumes:
       - vulnerable_data:/data/uploads
 
@@ -21,10 +28,10 @@ services:
     container_name: cwe770-fixed
     ports:
       - "5001:5000"
-    mem_limit: 256m
-    memswap_limit: 256m
-    mem_swappiness: 0
-    cpus: 1.0
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     volumes:
       - fixed_data:/data/uploads
 

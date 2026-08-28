@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>CWE-770 Demo Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #121212; color: #e0e0e0; margin: 20px; }
+        h1 { color: #fff; text-align: center; }
+        .grid { display: flex; gap: 20px; margin-bottom: 20px; }
+        .card { flex: 1; background: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; }
+        .status { font-weight: bold; padding: 4px 8px; border-radius: 4px; display: inline-block; }
+        .running { background: #2e7d32; color: #fff; }
+        .exited, .offline { background: #c62828; color: #fff; }
+        .controls { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #333; }
+        label { margin-right: 15px; }
+        input, select { background: #2a2a2a; color: #fff; border: 1px solid #444; padding: 5px 10px; border-radius: 4px; }
+        button { background: #0288d1; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px; }
+        button.btn-restart { background: #e65100; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #logs { background: #000; color: #00ff66; font-family: monospace; padding: 15px; border-radius: 8px; height: 300px; overflow-y: scroll; border: 1px solid #333; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+
+    <h1>CWE-770: Monitoreo de Demo</h1>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Vulnerable App (Puerto 5000)</h3>
+            <p>Estado: <span id="status-vulnerable" class="status offline">Cargando...</span></p>
+        </div>
+        <div class="card">
+            <h3>Fixed App (Puerto 5001)</h3>
+            <p>Estado: <span id="status-fixed" class="status offline">Cargando...</span></p>
+        </div>
+    </div>
+
+    <div class="controls">
+        <h3>Lanzar Prueba de Carga</h3>
+        <label>Objetivo:
+            <select id="targetPort">
+                <option value="5000">Vulnerable (5000)</option>
+                <option value="5001">Fixed (5001)</option>
+            </select>
+        </label>
+        <label>Peticiones: <input type="number" id="requests" value="150" style="width: 60px;"></label>
+        <label>Concurrencia: <input type="number" id="concurrency" value="60" style="width: 60px;"></label>
+        <label>Payload (MB): <input type="number" id="payload" value="6" style="width: 60px;"></label>
+        <br><br>
+        <button id="btnRun" onclick="runTest()">Ejecutar Carga</button>
+        <button id="btnRestart" class="btn-restart" onclick="restartContainers()">Reiniciar Contenedores</button>
+    </div>
+
+    <h3>Registros en Tiempo Real</h3>
+    <div id="logs">Esperando ejecución...</div>
+
+    <script>
+        function checkStatus() {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    updateBadge('status-vulnerable', data.vulnerable);
+                    updateBadge('status-fixed', data.fixed);
+                });
+        }
+
+        function updateBadge(id, status) {
+            const el = document.getElementById(id);
+            el.innerText = status.toUpperCase();
+            el.className = 'status ' + (status === 'running' ? 'running' : 'exited');
+        }
+
+        setInterval(checkStatus, 2000);
+        checkStatus();
+
+        function runTest() {
+            const btnRun = document.getElementById('btnRun');
+            const btnRestart = document.getElementById('btnRestart');
+            const logs = document.getElementById('logs');
+            const port = document.getElementById('targetPort').value;
+            const requests = document.getElementById('requests').value;
+            const concurrency = document.getElementById('concurrency').value;
+            const payload = document.getElementById('payload').value;
+
+            btnRun.disabled = true;
+            btnRestart.disabled = true;
+            logs.innerText = '';
+
+            const evtSource = new EventSource(`/api/run-test?port=${port}&requests=${requests}&concurrency=${concurrency}&payload=${payload}`);
+
+            evtSource.onmessage = function(e) {
+                const data = JSON.parse(e.data);
+                if (data.log) {
+                    logs.innerText += data.log;
+                    logs.scrollTop = logs.scrollHeight;
+                }
+                if (data.done) {
+                    evtSource.close();
+                    btnRun.disabled = false;
+                    btnRestart.disabled = false;
+                    checkStatus();
+                }
+            };
+
+            evtSource.onerror = function() {
+                evtSource.close();
+                btnRun.disabled = false;
+                btnRestart.disabled = false;
+                checkStatus();
+            };
+        }
+
+        function restartContainers() {
+            const btnRun = document.getElementById('btnRun');
+            const btnRestart = document.getElementById('btnRestart');
+            const logs = document.getElementById('logs');
+
+            btnRun.disabled = true;
+            btnRestart.disabled = true;
+            logs.innerText += '>>> Reiniciando contenedores Docker...\n';
+
+            fetch('/api/restart', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        logs.innerText += '>>> Contenedores reiniciados correctamente.\n';
+                    } else {
+                        logs.innerText += '>>> Error al reiniciar: ' + data.message + '\n';
+                    }
+                })
+                .catch(err => {
+                    logs.innerText += '>>> Error de conexión: ' + err + '\n';
+                })
+                .finally(() => {
+                    btnRun.disabled = false;
+                    btnRestart.disabled = false;
+                    checkStatus();
+                });
+        }
+    </script>
+</body>
+</html>
