@@ -1,5 +1,5 @@
 """
-DEMO EDUCATIVA - CWE-770: Versión MITIGADA
+DEMO - CWE-770: Versión MITIGADA
 ================================================================================
 Misma funcionalidad que el servidor vulnerable, pero con controles de
 asignación de recursos:
@@ -14,13 +14,9 @@ asignación de recursos:
 from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import os
 import time
 
 app = Flask(__name__)
-
-UPLOAD_DIR = "/data/uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --- MITIGACIÓN 1: límite máximo de tamaño de request (ej. 2 MB) ---
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
@@ -51,31 +47,11 @@ def health():
     return jsonify(status="ok", total_requests=request_count["total"])
 
 
-@app.route("/upload", methods=["POST"])
-@limiter.limit("10 per minute")  # límite más estricto para este endpoint costoso
-def upload():
+@app.route("/receive", methods=["POST"])
+def receive():
     request_count["total"] += 1
-
-    f = request.files.get("file")
-    if not f:
-        return jsonify(error="no file provided"), 400
-
-    filename = f"upload_{request_count['total']}_{int(time.time()*1000)}.bin"
-    path = os.path.join(UPLOAD_DIR, filename)
-
-    f.save(path)
-    size = os.path.getsize(path)
-
-    return jsonify(saved_as=filename, size_bytes=size), 200
-
-
-@app.route("/echo", methods=["POST"])
-@limiter.limit("20 per minute")
-def echo():
-    request_count["total"] += 1
-    data = request.get_data()  # Flask ya corta en MAX_CONTENT_LENGTH -> 413
+    data = request.get_data()
     return jsonify(received_bytes=len(data)), 200
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, threaded=True)

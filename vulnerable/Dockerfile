@@ -5,7 +5,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 
-# Límite de recursos real (memoria/CPU) se define en docker-compose,
-# no aquí -- el punto de la demo es que la APP no se auto-limita.
 EXPOSE 5000
 CMD ["python", "app.py"]

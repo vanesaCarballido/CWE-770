@@ -55,8 +55,8 @@ Esto te muestra el % de CPU y MB de RAM usados por cada contenedor en tiempo rea
 En otra terminal:
 
 ```bash
-python3 load_test.py --target http://localhost:5000 --endpoint /echo --requests 150 --concurrency 60 --payload-mb 6
-python3 load_test.py --target http://localhost:5001 --endpoint /echo --requests 150 --concurrency 60 --payload-mb 6
+python3 load_test.py --target http://localhost:5000 --requests 150 --concurrency 60 --payload-mb 6
+python3 load_test.py --target http://localhost:5001 --requests 150 --concurrency 60 --payload-mb 6
 ```
 
 Qué vas a observar:
@@ -66,6 +66,7 @@ Qué vas a observar:
   de Servicio**.
 - Todas las requests son aceptadas sin control, sin importar cuántas ni
   cuán grandes sean.
+- el contendor `cwe770-vulnerable` probablemente se caiga
 
 ## 5. Ejecutar la misma prueba contra el servidor MITIGADO
 
