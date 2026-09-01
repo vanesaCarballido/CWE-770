@@ -1,51 +1,70 @@
 """
 DEMO - CWE-770: Versión MITIGADA
 ================================================================================
-Misma funcionalidad que el servidor vulnerable, pero con controles de
-asignación de recursos:
-
+Controles de asignación de recursos:
   1. MAX_CONTENT_LENGTH: limita el tamaño máximo de cada request/archivo.
-  2. Rate limiting (flask-limiter): limita cuántas requests puede hacer
-     un mismo cliente (IP) por unidad de tiempo.
-  3. Validación explícita de tamaño antes de guardar en disco.
-  4. Respuestas 413 / 429 claras cuando se exceden los límites.
+  2. Rate limiting (flask-limiter): limita requests por cliente (IP).
+  3. Límite de concurrencia (Semaphore): evita saturación de memoria por hilos.
+  4. Respuestas 413 / 429 / 503 claras.
 """
 
-from flask import Flask, request, jsonify
+import threading
+import time
+from flask import Flask, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import time
 
 app = Flask(__name__)
 
-# --- MITIGACIÓN 1: límite máximo de tamaño de request (ej. 2 MB) ---
-app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
+# --- MITIGACIÓN 1: Límite máximo de tamaño de request (2 MB) ---
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 
-# --- MITIGACIÓN 2: rate limiting por IP ---
+# --- MITIGACIÓN 2: Límite de concurrencia simultánea ---
+CONCURRENCY_LIMIT = 5
+semaphore = threading.Semaphore(CONCURRENCY_LIMIT)
+
+@app.before_request
+def check_concurrency():
+    # Permitir la ruta /health sin consumir cupos de concurrencia
+    if request.path == "/health":
+        return
+        
+    if not semaphore.acquire(blocking=False):
+        return jsonify(error="Server busy, concurrency limit reached"), 503
+
+@app.teardown_request
+def release_concurrency(exception=None):
+    if request.path == "/health":
+        return
+        
+    try:
+        semaphore.release()
+    except ValueError:
+        pass
+
+# --- MITIGACIÓN 3: Rate limiting por IP ---
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["20 per minute"],  # límite global por defecto
+    default_limits=["20 per minute"],
     storage_uri="memory://",
 )
 
 request_count = {"total": 0}
 
-
+# --- MANEJADORES DE ERROR ---
 @app.errorhandler(413)
 def request_entity_too_large(e):
     return jsonify(error="payload too large, max 2MB"), 413
-
 
 @app.errorhandler(429)
 def rate_limit_exceeded(e):
     return jsonify(error="rate limit exceeded, slow down"), 429
 
-
+# --- RUTAS ---
 @app.route("/health")
 def health():
     return jsonify(status="ok", total_requests=request_count["total"])
-
 
 @app.route("/receive", methods=["POST"])
 def receive():
