@@ -1,108 +1,105 @@
 # Demo CWE-770: Allocation of Resources Without Limits or Throttling
 
-Laboratorio local (Docker) para comparar un servidor **vulnerable** contra
-uno **mitigado**, ambos con los mismos límites de contenedor (256MB RAM,
-1 CPU), para que la diferencia observada venga del código, no de Docker.
+Laboratorio local en Docker para comparar un servidor **vulnerable** contra uno **mitigado**, ambos limitados en contenedor (256MB RAM sin swap, 1 CPU) para evidenciar cómo las defensas a nivel de código previenen el colapso del sistema.
 
-⚠️ Uso exclusivo en tu entorno aislado (VM Kali + Docker). No apuntes el
-script de carga a ningún host que no sea `localhost`.
+Uso exclusivo en entorno aislado (VM Kali + Docker).
 
-## Estructura
+---
 
-```
+## Estructura del Proyecto
+
+```text
 cwe770-demo/
-├── docker-compose.yml
-├── vulnerable/       # puerto 5000 - sin límites ni rate limiting
-├── fixed/             # puerto 5001 - con límites y rate limiting
-└── loadtest/          # script de carga para comparar ambos
+├── docker-compose.yml # Configuración de límites (256MB RAM, memswap_limit: 256m)
+├── vulnerable/        # Puerto 5000: Sin límites de payload, rate limit ni concurrencia
+├── fixed/             # Puerto 5001: Con MAX_CONTENT_LENGTH, rate limit y concurrencia acotada
+├── loadtest/          # Script de prueba (load_test.py) invocado internamente por el backend
+└── dashboard/         # Puerto 8000: Interfaz HTML/JS y backend Flask (docker-py)
+
 ```
+
+---
 
 ## 1. Levantar el laboratorio
 
-Desde la carpeta `cwe770-demo/`:
+Desde la carpeta raíz `cwe770-demo/`, construye e inicia los servicios:
 
 ```bash
 docker compose up --build -d
+
 ```
 
-Verificá que ambos respondan:
+Verifica la respuesta inicial de los tres contenedores:
 
 ```bash
-curl http://localhost:5000/health   # vulnerable
-curl http://localhost:5001/health   # fixed
+curl http://localhost:5000/health   # Vulnerable
+curl http://localhost:5001/health   # Fixed
+curl http://localhost:8000          # Interfaz de Monitoreo
+
 ```
 
-## 2. Preparar el script de carga
+---
+
+## 2. Uso de la Interfaz Web (Puerto 8000)
+
+Accede mediante el navegador a: **`http://localhost:8000`**
+
+### Funcionalidades de la Interfaz:
+
+* **Monitoreo de Estado:** Tarjetas visuales que muestran en tiempo real si cada contenedor está `RUNNING` u `OFFLINE`/`EXITED` (consultando `/api/status` cada 2 segundos).
+* **Parámetros Configurables:** Permite ajustar dinámicamente el objetivo (**Vulnerable 5000** o **Fixed 5001**), la cantidad de peticiones, nivel de concurrencia y el tamaño del payload (MB).
+* **Registros en Tiempo Real:** Consola integrada que transmite la ejecución del ataque mediante *Server-Sent Events* (SSE).
+* **Restauración del Entorno:** Botón **"Reiniciar Contenedores"** para recuperar los servicios caídos por *OOM-kill* a través de llamadas directas a la API de Docker.
+
+---
+
+## 3. Demostración de Ataque (CWE-770)
+
+Para recrear la vulnerabilidad desde el formulario de la interfaz:
+
+1. Selecciona el objetivo **Vulnerable (5000)**.
+2. Ingresa los parámetros de ataque (ejemplo: `Peticiones: 150`, `Concurrencia: 60`, `Payload: 6 MB`).
+3. Presiona **"Ejecutar Carga"**.
+4. **Resultado:** El contenedor `cwe770-vulnerable` agotará los 256MB de RAM inmediatamente. Su badge cambiará automáticamente a **`EXITED`** o **`OFFLINE`**.
+5. Cambia el objetivo a **Fixed (5001)** y lanza la misma prueba.
+6. **Resultado:** El servidor mitigado descartará la ráfaga con respuestas HTTP `413` / `429` / `503` manteniéndose en estado **`RUNNING`**.
+7. Presiona **"Reiniciar Contenedores"** para restaurar el entorno vulnerable y repetir las pruebas.
+
+---
+
+## 4. Análisis Técnico del Fallo
+
+Al estar deshabilitado el swapping a nivel de Docker Compose (`memswap_limit: 256m`), la falta de validación en el servidor vulnerable desencadena una expulsión por falta de memoria gestionada por el kernel.
+
+Puedes auditar el motivo del colapso ejecutando en la terminal del host:
 
 ```bash
-cd loadtest
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+docker inspect cwe770-vulnerable --format='{{.State.OOMKilled}}' # Devuelve: true
+docker inspect cwe770-vulnerable --format='ExitCode={{.State.ExitCode}}' # Devuelve: 137
+
 ```
 
-## 3. Observar recursos en vivo
+---
 
-En una terminal aparte, antes de lanzar la carga:
+## 5. Limpieza del Entorno
+
+Para detener y limpiar todos los recursos de la demo:
 
 ```bash
-docker stats cwe770-vulnerable cwe770-fixed
+docker compose down
+
 ```
 
-Esto te muestra el % de CPU y MB de RAM usados por cada contenedor en tiempo real.
+---
 
-## 4. Ejecutar la prueba contra el servidor VULNERABLE
+## Resumen de Mitigaciones
 
-En otra terminal:
+| Factor de Control | Servidor Vulnerable (`:5000`) | Servidor Fixed (`:5001`) |
+| --- | --- | --- |
+| **Límite de Payload** | ❌ Sin control | ✅ Restringido (`MAX_CONTENT_LENGTH`) |
+| **Tasa de Peticiones** | ❌ Sin control | ✅ Restringido por IP (`flask-limiter`) |
+| **Concurrencia** | ❌ Sin control | ✅ Conexiones simultáneas acotadas |
+| **Memoria Swap** | 🚫 Desactivado (`256m`) | 🚫 Desactivado (`256m`) |
+| **Resistencia a OOM** | ❌ Cae por OOM-kill (`ExitCode: 137`) | ✅ Estable (Rechazos HTTP controlados) |
 
-```bash
-python3 load_test.py --target http://localhost:5000 --requests 150 --concurrency 60 --payload-mb 6
-python3 load_test.py --target http://localhost:5001 --requests 150 --concurrency 60 --payload-mb 6
 ```
-
-Qué vas a observar:
-- La memoria del contenedor `cwe770-vulnerable` sube rápido en `docker stats`.
-- Con carga suficiente, el contenedor puede llegar al límite de 256MB y
-  el proceso Flask puede caerse (OOM) o volverse muy lento -> **Denegación
-  de Servicio**.
-- Todas las requests son aceptadas sin control, sin importar cuántas ni
-  cuán grandes sean.
-- el contendor `cwe770-vulnerable` probablemente se caiga
-
-## 5. Ejecutar la misma prueba contra el servidor MITIGADO
-
-```bash
-python3 load_test.py --target http://localhost:5001 --requests 200 --concurrency 50 --payload-mb 5
-```
-
-Qué vas a observar:
-- Muchas requests devuelven **413** (payload too large, porque cada
-  archivo de 5MB excede el límite de 2MB configurado).
-- Si subís el límite de tamaño para que pasen, vas a ver **429** (rate
-  limit exceeded) apenas se superan las 10 requests/min al endpoint
-  `/upload`.
-- El consumo de memoria del contenedor `cwe770-fixed` se mantiene estable
-  y bajo, incluso bajo la misma carga.
-
-## 6. Variar la demo
-
-- Subí `--payload-mb` a 20 o 50 para ver más rápido el efecto en el
-  servidor vulnerable.
-- Probá el endpoint `--endpoint /echo` (carga el body entero en memoria
-  sin guardarlo a disco -> presión de RAM más directa).
-- Ajustá `mem_limit` en `docker-compose.yml` para simular un servidor
-  con menos recursos (ej. `128m`) y ver la caída más rápido.
-
-## 7. Apagar todo
-
-```bash
-docker compose down -v
-```
-
-## Resumen para tu presentación/informe
-
-| Aspecto                         | Vulnerable (5000)          | Mitigado (5001)                       |
-|----------------------------------|-----------------------------|----------------------------------------|
-| Límite de tamaño de request       | Ninguno                     | 2 MB (`MAX_CONTENT_LENGTH`)            |
-| Rate limiting                    | Ninguno                     | 10-20 req/min por IP (`flask-limiter`) |
-| Comportamiento bajo carga         | Consumo de RAM sin control, riesgo de OOM/crash | Rechazos controlados (413/429), servicio estable |
-| CWE relacionado                  | CWE-770                     | Mitigación de CWE-770                  |
