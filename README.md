@@ -135,6 +135,7 @@ curl http://localhost:8000
 También se puede acceder desde el navegador:
 
 **http://localhost:8000**
+<img width="1072" height="628" alt="Captura de pantalla 2026-09-03 a la(s) 11 42 53" src="https://github.com/user-attachments/assets/434e9a4b-d3f0-4168-b55f-f32b2ca609c4" />
 
 ---
 
@@ -169,18 +170,12 @@ Payload: 6 MB
 
 3. Presionar **"Ejecutar Carga"**.
 4. Observar el consumo de memoria y el estado del contenedor.
+<img width="835" height="160" alt="Captura de pantalla 2026-09-03 a la(s) 11 44 13" src="https://github.com/user-attachments/assets/57be18c8-ccfd-45d3-ad68-3661085efbdb" />
 
-### Resultado esperado
+### Resultado esperado:
+Las solicitudes generan un consumo elevado de recursos y terminan en errores de conexión/timeout. En caso de agotamiento de memoria, el contenedor puede ser terminado por el sistema.
 
-El servidor vulnerable procesa las solicitudes sin aplicar límites suficientes.
-
-El consumo de memoria aumenta hasta alcanzar el límite de **256 MB**.
-
-El contenedor puede terminar debido a un **OOM Kill** y aparecer como:
-
-```text
-EXITED
-```
+<img width="877" height="450" alt="Captura de pantalla 2026-09-03 a la(s) 11 43 44" src="https://github.com/user-attachments/assets/e50f6085-92bd-4eed-a412-2afc8d60b054" />
 
 ---
 
@@ -190,24 +185,23 @@ Repetir la misma prueba seleccionando:
 
 **Fixed (`5001`)**
 
+<img width="848" height="155" alt="Captura de pantalla 2026-09-03 a la(s) 11 48 25" src="https://github.com/user-attachments/assets/d5aefbd7-782b-4fb3-9a0c-b1a99a387a66" />
+
 El servidor mitigado aplica diferentes controles antes de procesar las solicitudes.
 
-Los resultados esperados pueden incluir:
 
-| Código | Significado              |
-| -----: | ------------------------ |
-|  `413` | Payload demasiado grande |
-|  `429` | Demasiadas solicitudes   |
-|  `502` | Bad Gateway              |
-|  `503` | Service Unavailable      |
+### Resultado esperado: 
+Las solicitudes son rechazadas o limitadas mediante los mecanismos de protección:
 
-El objetivo es que el contenedor permanezca:
+HTTP 413: payload rechazado por superar el límite permitido.
 
-```text
-RUNNING
-```
+HTTP 429: solicitudes rechazadas por exceso de frecuencia/concurrencia.
 
-en lugar de terminar por falta de memoria.
+0 errores de conexión/timeout: el servicio continúa disponible.
+
+Esto permite observar la diferencia entre un servicio que permite un consumo de recursos sin control y otro que aplica límites y throttling para evitar la saturación.
+
+<img width="862" height="450" alt="Captura de pantalla 2026-09-03 a la(s) 11 49 54" src="https://github.com/user-attachments/assets/8354f2b0-5147-4a40-91d7-1ed27a3b74ec" />
 
 ---
 
