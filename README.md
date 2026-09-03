@@ -52,6 +52,7 @@ Verificar la instalación:
 docker --version
 docker compose version
 ```
+<img width="376" height="65" alt="Captura de pantalla 2026-09-03 a la(s) 11 37 56" src="https://github.com/user-attachments/assets/4b2e1102-9aa7-4d1b-bc26-f18ffbc665cf" />
 
 ---
 
@@ -104,12 +105,14 @@ Desde la carpeta raíz:
 ```bash
 docker compose up --build -d
 ```
+<img width="911" height="215" alt="Captura de pantalla 2026-09-03 a la(s) 11 38 58" src="https://github.com/user-attachments/assets/2d8223e5-34be-48de-82b0-ec37c32bd7f1" />
 
 Verificar los contenedores:
 
 ```bash
 docker compose ps
 ```
+<img width="894" height="137" alt="Captura de pantalla 2026-09-03 a la(s) 11 39 56" src="https://github.com/user-attachments/assets/3fc23121-c673-4589-8ee4-946d41197167" />
 
 ### Comprobar el servidor vulnerable
 
