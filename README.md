@@ -1,140 +1,315 @@
 # Demo CWE-770: Allocation of Resources Without Limits or Throttling
 
-Laboratorio local en Docker para comparar un servidor **vulnerable** contra uno **mitigado**, ambos limitados en contenedor (256MB RAM sin swap, 1 CPU) para evidenciar cómo las defensas a nivel de código previenen el colapso del sistema.
+Laboratorio local en Docker para comparar un servidor **vulnerable** con uno **mitigado** frente al consumo excesivo de recursos.
 
-Uso exclusivo en entorno aislado (VM Kali + Docker).
+Ambos contenedores tienen un límite de **256 MB de RAM y 1 CPU**. El objetivo es observar cómo la falta de límites puede provocar un **OOM (Out Of Memory)** y cómo diferentes controles de seguridad pueden evitarlo.
+
 
 ---
 
-## Estructura del Proyecto
+## 1. Objetivos
+
+* Comprender la vulnerabilidad **CWE-770**.
+* Observar el consumo excesivo de memoria provocado por peticiones grandes y concurrentes.
+* Comparar un servidor vulnerable con uno protegido.
+* Analizar un **OOM Kill** en Docker.
+* Comprobar las mitigaciones mediante códigos HTTP y estado de los contenedores.
+* Demostrar el principio de **Defense in Depth**.
+
+---
+
+## 2. Estructura del Proyecto
 
 ```text
 cwe770-demo/
-├── docker-compose.yml # Configuración de límites (256MB RAM, memswap_limit: 256m)
-├── vulnerable/        # Puerto 5000: Sin límites de payload, rate limit ni concurrencia
-├── fixed/  # Puerto 5001: Nginx (Reverse Proxy) + Gunicorn + Flask (Defensa en Profundidad)
-├── loadtest/          # Script de prueba (load_test.py) invocado internamente por el backend
-└── dashboard/         # Puerto 8000: Interfaz HTML/JS y backend Flask (docker-py)
+├── docker-compose.yml   # Servicios y límites de recursos
+├── vulnerable/          # Puerto 5000: servidor vulnerable
+├── fixed/               # Puerto 5001: Nginx + Gunicorn + Flask
+├── loadtest/            # Script de prueba de carga
+└── dashboard/           # Puerto 8000: interfaz de monitoreo
+```
 
+| Servicio   | Puerto | Descripción                        |
+| ---------- | -----: | ---------------------------------- |
+| Vulnerable | `5000` | Flask sin límites adecuados        |
+| Fixed      | `5001` | Nginx + Gunicorn + Flask           |
+| Dashboard  | `8000` | Interfaz para ejecutar las pruebas |
+
+---
+
+## 3. Prerrequisitos
+
+Se necesita:
+
+* Docker
+* Docker Compose v2
+* Navegador web
+* Entorno aislado para realizar las pruebas
+
+Verificar la instalación:
+
+```bash
+docker --version
+docker compose version
 ```
 
 ---
 
-## 1. Levantar el laboratorio
+## 4. Arquitectura
 
-Desde la carpeta raíz `cwe770-demo/`, construye e inicia los servicios:
+### Servidor Vulnerable
+
+```text
+Cliente
+   │
+   ▼
+Flask / Werkzeug
+   │
+   ▼
+Sin límites adecuados
+   │
+   ▼
+Alto consumo de memoria
+   │
+   ▼
+OOM Kill
+```
+
+### Servidor Fixed
+
+```text
+Cliente
+   │
+   ▼
+Nginx
+   ├── Límite de payload
+   ├── Rate limiting
+   └── Timeouts
+        │
+        ▼
+     Gunicorn
+        │
+        ▼
+      Flask
+        │
+        └── MAX_CONTENT_LENGTH
+```
+
+---
+
+# 5. Ejecutar el Laboratorio
+
+Desde la carpeta raíz:
 
 ```bash
 docker compose up --build -d
 ```
 
-Verifica la respuesta inicial de los tres contenedores:
+Verificar los contenedores:
 
 ```bash
-curl http://localhost:5000/health   # Vulnerable
+docker compose ps
 ```
 
-```
-curl http://localhost:5001/health   # Fixed
-```
-
-```
-curl http://localhost:8000          # Interfaz de Monitoreo
-```
-
----
-
-## 2. Uso de la Interfaz Web (Puerto 8000)
-
-Accede mediante el navegador a: **`http://localhost:8000`**
-
-### Funcionalidades de la Interfaz:
-
-* **Monitoreo de Estado:** Tarjetas visuales que muestran en tiempo real si cada contenedor está `RUNNING` u `OFFLINE`/`EXITED` (consultando `/api/status` cada 2 segundos).
-* **Parámetros Configurables:** Permite ajustar dinámicamente el objetivo (**Vulnerable 5000** o **Fixed 5001**), la cantidad de peticiones, nivel de concurrencia y el tamaño del payload (MB).
-* **Registros en Tiempo Real:** Consola integrada que transmite la ejecución del ataque mediante *Server-Sent Events* (SSE).
-* **Restauración del Entorno:** Botón **"Reiniciar Contenedores"** para recuperar los servicios caídos por *OOM-kill* a través de llamadas directas a la API de Docker.
-
----
-
-## 3. Demostración de Ataque (CWE-770)
-
-Para recrear la vulnerabilidad desde el formulario de la interfaz:
-
-1. Selecciona el objetivo **Vulnerable (5000)**.
-2. Ingresa los parámetros de ataque (ejemplo: `Peticiones: 150`, `Concurrencia: 60`, `Payload: 6 MB`).
-3. Presiona **"Ejecutar Carga"**.
-4. **Resultado:** El contenedor `cwe770-vulnerable` agotará los 256MB de RAM inmediatamente. Su badge cambiará automáticamente a **`EXITED`** o **`OFFLINE`**.
-5. Cambia el objetivo a **Fixed (5001)** y lanza la misma prueba.
-6. **Resultado**: El servidor mitigado descartará la ráfaga con respuestas HTTP `413` (Payload excesivo), `429` (Rate limit por IP) o `502`/`503` (Saturación de proxy/workers), manteniéndose en estado **`RUNNING`**.
-7. Presiona **"Reiniciar Contenedores"** para restaurar el entorno vulnerable y repetir las pruebas.
-
----
-
-## 4. Análisis Técnico del Fallo
-
-Al estar deshabilitado el swapping a nivel de Docker Compose (`memswap_limit: 256m`), la falta de validación en el servidor vulnerable desencadena una expulsión por falta de memoria gestionada por el kernel.
-
-Puedes auditar el motivo del colapso ejecutando en la terminal del host:
+### Comprobar el servidor vulnerable
 
 ```bash
-docker inspect cwe770-vulnerable --format='{{.State.OOMKilled}}' # Devuelve: true
-docker inspect cwe770-vulnerable --format='ExitCode={{.State.ExitCode}}' # Devuelve: 137
+curl http://localhost:5000/health
+```
 
+### Comprobar el servidor Fixed
+
+```bash
+curl http://localhost:5001/health
+```
+
+### Comprobar el Dashboard
+
+```bash
+curl http://localhost:8000
+```
+
+También se puede acceder desde el navegador:
+
+**http://localhost:8000**
+
+---
+
+# 6. Dashboard
+
+La interfaz permite:
+
+* Ver el estado de los contenedores.
+* Seleccionar el servidor vulnerable o Fixed.
+* Configurar cantidad de peticiones.
+* Configurar concurrencia.
+* Configurar tamaño del payload.
+* Ver los resultados de la prueba en tiempo real.
+* Reiniciar los contenedores.
+
+---
+
+# 7. Demostración de CWE-770
+
+## 7.1 Servidor Vulnerable
+
+Desde el Dashboard:
+
+1. Seleccionar **Vulnerable (`5000`)**.
+2. Configurar, por ejemplo:
+
+```text
+Peticiones: 150
+Concurrencia: 60
+Payload: 6 MB
+```
+
+3. Presionar **"Ejecutar Carga"**.
+4. Observar el consumo de memoria y el estado del contenedor.
+
+### Resultado esperado
+
+El servidor vulnerable procesa las solicitudes sin aplicar límites suficientes.
+
+El consumo de memoria aumenta hasta alcanzar el límite de **256 MB**.
+
+El contenedor puede terminar debido a un **OOM Kill** y aparecer como:
+
+```text
+EXITED
 ```
 
 ---
 
-## 5. Limpieza del Entorno
+## 7.2 Servidor Fixed
 
-Para detener y limpiar todos los recursos de la demo:
+Repetir la misma prueba seleccionando:
+
+**Fixed (`5001`)**
+
+El servidor mitigado aplica diferentes controles antes de procesar las solicitudes.
+
+Los resultados esperados pueden incluir:
+
+| Código | Significado              |
+| -----: | ------------------------ |
+|  `413` | Payload demasiado grande |
+|  `429` | Demasiadas solicitudes   |
+|  `502` | Bad Gateway              |
+|  `503` | Service Unavailable      |
+
+El objetivo es que el contenedor permanezca:
+
+```text
+RUNNING
+```
+
+en lugar de terminar por falta de memoria.
+
+---
+
+# 8. Comprobar el OOM
+
+Después de una prueba contra el servidor vulnerable, comprobar:
+
+```bash
+docker inspect cwe770-vulnerable \
+  --format='OOMKilled={{.State.OOMKilled}}'
+```
+
+Resultado esperado:
+
+```text
+OOMKilled=true
+```
+
+Consultar también el código de salida:
+
+```bash
+docker inspect cwe770-vulnerable \
+  --format='ExitCode={{.State.ExitCode}}'
+```
+
+Normalmente:
+
+```text
+ExitCode=137
+```
+
+El código `137` corresponde normalmente a un proceso terminado mediante `SIGKILL`.
+
+---
+
+# 9. Monitorización
+
+Durante la prueba se puede observar el consumo de recursos con:
+
+```bash
+docker stats
+```
+
+Para consultar específicamente el servidor vulnerable:
+
+```bash
+docker stats cwe770-vulnerable
+```
+
+También se pueden revisar los logs:
+
+```bash
+docker compose logs vulnerable
+docker compose logs fixed
+```
+
+---
+
+# 10. Mitigaciones
+
+El servidor Fixed utiliza diferentes capas de protección:
+
+| Control                  | Vulnerable | Fixed |
+| ------------------------ | ---------- | ----- |
+| Límite de payload        | ✗          | ✓     |
+| Rate limiting            | ✗          | ✓     |
+| Timeouts                 | ✗          | ✓     |
+| Control de concurrencia  | ✗          | ✓     |
+| Validación en Flask      | ✗          | ✓     |
+| Nginx Reverse Proxy      | ✗          | ✓     |
+| Límite de memoria Docker | ✓          | ✓     |
+
+La combinación de estos mecanismos implementa **Defense in Depth**, evitando depender de una única medida de seguridad.
+
+---
+
+# 11. Limpieza
+
+Para detener el laboratorio:
 
 ```bash
 docker compose down
+```
 
+Para volver a construirlo desde cero:
+
+```bash
+docker compose down
+docker compose up --build -d
 ```
 
 ---
 
-## Resumen de Mitigaciones
+## 12. Conclusión
 
-| Factor de Control | Servidor Vulnerable (:5000) | Servidor Fixed (:5001) |
-| --- | --- | --- |
-| **Arquitectura** | Flask (Werkzeug dev server) | Nginx (Proxy) + Gunicorn + Flask |
-| **Límite de Payload** | Sin control (Satura RAM) | client_max_body_size (Nginx) y MAX_CONTENT_LENGTH (Flask) |
-| **Rate Limiting / Throttling** | Sin control | limit_req_zone por IP a nivel de Nginx |
-| **Control de Concurrencia** | Sin control | Proceso acotado en Gunicorn (-w 2 --threads X)
-| **Protección Protocolo HTTP** | Vulnerable a Slowloris / Headers | Timeouts e inspección de buffers en Nginx
-| **Resistencia a OOM** | Caída por OOM-kill (ExitCode: 137) | Estable (Rechazos HTTP 413 / 429 / 502 / 503)
+La demo muestra cómo **CWE-770** puede provocar un consumo excesivo de recursos cuando una aplicación no establece límites adecuados.
 
+En el servidor vulnerable, una carga elevada puede provocar que el contenedor alcance el límite de memoria y sea terminado mediante un **OOM Kill**.
 
-## Filtros aplicados en fixed
-```mermaid
-graph TD
-    A[Petición HTTP] --> B[Nginx :5001]
-    
-    subgraph Capa 1: Reverse Proxy - Nginx
-        B --> C{¿Headers > 1k?}
-        C -- Sí --> C1[HTTP 400 Bad Request]
-        C -- No --> D{¿Lento / Slowloris?}
-        D -- Sí --> D1[HTTP 408 Timeout]
-        D -- No --> E{¿Payload > 10MB?}
-        E -- Sí --> E1[HTTP 413 Payload Too Large]
-        E -- No --> F{¿Excede Rate Limit?}
-        F -- Sí --> F1[HTTP 429 Too Many Requests]
-    end
+El servidor Fixed incorpora controles en diferentes capas para limitar:
 
-    F -- No --> G[Gunicorn - Capa WSGI]
+* Tamaño de las peticiones.
+* Frecuencia de solicitudes.
+* Concurrencia.
+* Tiempo de conexión.
+* Recursos disponibles.
 
-    subgraph Capa 2: Servidor de Aplicación
-        G --> H{¿Pool Saturado?}
-        H -- Sí --> H1[HTTP 502/503 Service Unavailable]
-        H -- No --> I[Flask App :5000]
-    end
-
-    subgraph Capa 3: Código Python
-        I --> J{MAX_CONTENT_LENGTH}
-        J -- Excedido --> J1[HTTP 413 Payload Too Large]
-        J -- OK --> K[200 OK - Petición Procesada]
-    end
-```
+De esta forma, las solicitudes excesivas son rechazadas o reguladas antes de provocar la caída del servicio.
