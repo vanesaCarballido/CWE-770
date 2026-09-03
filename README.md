@@ -26,16 +26,20 @@ Desde la carpeta raíz `cwe770-demo/`, construye e inicia los servicios:
 
 ```bash
 docker compose up --build -d
-
 ```
 
 Verifica la respuesta inicial de los tres contenedores:
 
 ```bash
 curl http://localhost:5000/health   # Vulnerable
-curl http://localhost:5001/health   # Fixed
-curl http://localhost:8000          # Interfaz de Monitoreo
+```
 
+```
+curl http://localhost:5001/health   # Fixed
+```
+
+```
+curl http://localhost:8000          # Interfaz de Monitoreo
 ```
 
 ---
