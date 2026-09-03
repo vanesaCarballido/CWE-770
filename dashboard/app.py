@@ -58,6 +58,7 @@ def restart_containers():
 
 @app.route("/api/run-test")
 def run_test():
+    
     target_port = request.args.get("port", "5000")
     requests_cnt = request.args.get("requests", "150")
     concurrency = request.args.get("concurrency", "60")
@@ -65,7 +66,7 @@ def run_test():
 
     # Mapeo de puerto a nombre de servicio para la red interna de Docker
     host_target = "vulnerable" if target_port == "5000" else "fixed"
-    url = f"http://{host_target}:5000"
+    url = f"http://{host_target}:{target_port}"
 
     def generate():
         cmd = [

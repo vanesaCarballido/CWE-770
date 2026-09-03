@@ -23,13 +23,14 @@ services:
       - vulnerable_data:/data/uploads
 
   fixed:
-    build: ./fixed
+    build:
+      context: .
+      dockerfile: fixed/Dockerfile
     container_name: cwe770-fixed
     ports:
-      - "5001:5000"
-    mem_limit: 256m
-    memswap_limit: 256m   # = mem_limit -> sin swap
-    mem_swappiness: 0
+      - "5001:5001"
+    mem_limit: 256M
+    memswap_limit: 256m
     volumes:
       - fixed_data:/data/uploads
 
